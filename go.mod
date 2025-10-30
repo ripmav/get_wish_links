@@ -1,4 +1,4 @@
-module get_wish_links
+module github.com/ripmav/get_wish_links
 
 go 1.25
 
