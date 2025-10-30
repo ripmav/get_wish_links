@@ -1,0 +1,115 @@
+name: Release Build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write  # required for uploading assets to the release
+
+jobs:
+  build:
+    name: Build cross-platform binaries
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
+    env:
+      CGO_ENABLED: "0"
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.3'
+          cache: true
+
+      - name: Show Go environment
+        run: |
+          go version
+          go env
+
+      - name: Build
+        run: |
+          mkdir -p dist
+          BIN_NAME=get_wish_links
+          EXT=""
+          if [ "${GOOS}" = "windows" ]; then EXT=".exe"; fi
+          OUT="dist/${BIN_NAME}_${GOOS}_${GOARCH}${EXT}"
+          echo "Building ${OUT}"
+          go build -trimpath -ldflags "-s -w" -o "$OUT" ./cmd/get_wish_links
+
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          BIN_NAME=get_wish_links
+          EXT=""
+          if [ "${GOOS}" = "windows" ]; then EXT=".exe"; fi
+          FILE="dist/${BIN_NAME}_${GOOS}_${GOARCH}${EXT}"
+          ARCHIVE="dist/${BIN_NAME}_${GOOS}_${GOARCH}"
+
+          # Prepare a temp staging dir so the executable inside the archive is named just "get_wish_links[.exe]"
+          STAGE=$(mktemp -d)
+          cp -f "$FILE" "$STAGE/${BIN_NAME}${EXT}"
+          [ -f README.md ] && cp -f README.md "$STAGE/README.md" || true
+          [ -f LICENSE ] && cp -f LICENSE "$STAGE/LICENSE" || true
+
+          if [ "${GOOS}" = "windows" ]; then
+            (cd "$STAGE" && zip -9 -r "${GITHUB_WORKSPACE}/${ARCHIVE}.zip" .)
+          else
+            tar -C "$STAGE" -czf "${ARCHIVE}.tar.gz" .
+          fi
+          rm -rf "$STAGE"
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          shopt -s nullglob
+          for f in get_wish_links_*.*; do
+            sha256sum "$f" > "$f.sha256"
+          done
+
+      - name: Upload artifacts (workflow run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: build_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: |
+            dist/get_wish_links_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz
+            dist/get_wish_links_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz.sha256
+            dist/get_wish_links_${{ matrix.goos }}_${{ matrix.goarch }}.zip
+            dist/get_wish_links_${{ matrix.goos }}_${{ matrix.goarch }}.zip.sha256
+          if-no-files-found: ignore
+
+  release:
+    name: Attach assets to release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: build_*
+          merge-multiple: true
+          path: dist
+
+      - name: List downloaded assets
+        run: ls -la dist
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.event_name == 'release'
+        with:
+          files: |
+            dist/get_wish_links_*.tar.gz
+            dist/get_wish_links_*.tar.gz.sha256
+            dist/get_wish_links_*.zip
+            dist/get_wish_links_*.zip.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
