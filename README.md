@@ -22,6 +22,10 @@ So you can use the URL for third-party wish tracking tools (like paimon.moe's au
 
 - Go 1.25 or higher
 
+### Download pre-built binaries
+
+Check the [Releases](https://github.com/ripmav/get_wish_links/releases) page for pre-built binaries for your platform.
+
 ### Build from source
 ```bash
 go build -o get_wish_links
